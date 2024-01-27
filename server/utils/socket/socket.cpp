@@ -3,8 +3,8 @@
 //
 #include "socket.h"
 
-int unit::server::net::create_socket(int port, const std::string&ip_addr, int backlog, IPV ipv) {
-    int soc_fd = socket((ipv == IPV::IPV4) ? AF_INET : AF_INET6, SOCK_STREAM, 0);
+int usub::server::net::createSocket(int port, const std::string &ip_addr, int backlog, usub::server::core::IPV ipv) {
+    int soc_fd = socket((ipv == usub::server::core::IPV::IPV4) ? AF_INET : AF_INET6, SOCK_STREAM, 0);
     if (soc_fd < 0) {
         error_log("Socket creation failed");
         exit(9);
@@ -24,7 +24,7 @@ int unit::server::net::create_socket(int port, const std::string&ip_addr, int ba
     }
 
     sockaddr_in addr = {};
-    addr.sin_family = (ipv == IPV::IPV4) ? AF_INET : AF_INET6;
+    addr.sin_family = (ipv == usub::server::core::IPV::IPV4) ? AF_INET : AF_INET6;
     addr.sin_addr.s_addr = inet_addr(ip_addr.c_str());
     addr.sin_port = htons(port);
 

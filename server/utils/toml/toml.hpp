@@ -8665,7 +8665,7 @@ TOML_IMPL_NAMESPACE_START
 	TOML_CONST_GETTER
 	constexpr bool is_non_ascii_horizontal_whitespace(char32_t c) noexcept
 	{
-		// 20 code units from 8 ranges (spanning a search area of 65120)
+		// 20 code usubs from 8 ranges (spanning a search area of 65120)
 
 		if (c < U'\xA0' || c > U'\uFEFF')
 			return false;
@@ -8705,7 +8705,7 @@ TOML_IMPL_NAMESPACE_START
 		if TOML_UNLIKELY(c == U'+')
 			return true;
 #endif
-		// 64 code units from 5 ranges (spanning a search area of 78)
+		// 64 code usubs from 5 ranges (spanning a search area of 78)
 
 		if (c < U'-' || c > U'z')
 			return false;
@@ -8719,7 +8719,7 @@ TOML_IMPL_NAMESPACE_START
 	TOML_CONST_GETTER
 	constexpr bool is_non_ascii_bare_key_character(char32_t c) noexcept
 	{
-		// 971732 code units from 16 ranges (spanning a search area of 982862)
+		// 971732 code usubs from 16 ranges (spanning a search area of 982862)
 
 		if (c < U'\xB2' || c > U'\U000EFFFF')
 			return false;
@@ -8731,7 +8731,7 @@ TOML_IMPL_NAMESPACE_START
 		{
 			case 0x00: // [0] 00B2 - 3CAF
 			{
-				// 12710 code units from 13 ranges (spanning a search area of 15358)
+				// 12710 code usubs from 13 ranges (spanning a search area of 15358)
 
 				TOML_ASSUME(c >= U'\xB2' && c <= U'\u3CAF');
 
@@ -15057,7 +15057,7 @@ TOML_IMPL_NAMESPACE_START
 				const auto add_trait = [&](auto t) noexcept { traits = static_cast<value_traits>(traits | t); };
 
 				// examine the first character to get the 'begins with' traits
-				// (good fail-fast opportunity; all the remaining types begin with numeric digits or signs)
+				// (good fail-fast opportusuby; all the remaining types begin with numeric digits or signs)
 				if (is_decimal_digit(*cp))
 				{
 					add_trait(begins_digit);

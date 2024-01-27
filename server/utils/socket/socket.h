@@ -12,10 +12,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include "data/types.h"
+#include "core/net.h"
 #include "logging/logger.h"
 
-namespace unit::server::net {
-    int create_socket(int port, const std::string&ip_addr, int backlog, IPV ipv);
+namespace usub::server::net {
+    int createSocket(int port, const std::string &ip_addr, int backlog, usub::server::core::IPV ipv);
 }
 #endif //SOCKET_H

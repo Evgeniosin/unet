@@ -8,7 +8,7 @@
 #include <iostream>
 #include "toml/toml.hpp"
 
-namespace unit::server {
+namespace usub::server {
     namespace configuration {
         namespace error {
             class WrongConfig final : public std::exception {
@@ -57,7 +57,7 @@ namespace unit::server {
         };
 
     }; // configuration
-}; // unit::server
+}; // usub::server
 
 
 #endif //CONFIGREADER_H
