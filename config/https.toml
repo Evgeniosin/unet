@@ -1,0 +1,13 @@
+[server]
+threads  = 4
+backlog  = 128
+
+[[listener]]
+port = 25565
+ssl  = false
+
+[[listener]]
+port      = 8443
+ssl       = true
+key_file  = "key.pem"
+cert_file = "cert.pem"

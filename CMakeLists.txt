@@ -1,0 +1,200 @@
+cmake_minimum_required(VERSION 3.22..3.29) #3.24
+project(server VERSION 1.0.0)
+
+set(CMAKE_CXX_STANDARD 23)
+
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3")
+
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0 -fpic")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -fpic")
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+
+#set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer" CACHE STRING "Debug flags" FORCE)
+#set(CMAKE_C_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer" CACHE STRING "Debug flags" FORCE)
+#set(CMAKE_EXE_LINKER_FLAGS_DEBUG "-fsanitize=address,undefined" CACHE STRING "Linker flags" FORCE)
+#set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "-fsanitize=address,undefined" CACHE STRING "Linker flags" FORCE)
+
+# ========================================
+# ======= BUILDING LIBRARY =============
+# ========================================
+
+# Find uvent
+Find_Package(uvent REQUIRED)
+
+set(UVENT_PATH "$ENV{UVENT_PATH}" CACHE PATH "Path to the uvent directory")
+
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+include_directories(${server_SOURCE_DIR})
+
+set(UVENT_BUILD_PATH "$ENV{UVENT_BUILD_PATH}" CACHE PATH "Path to the uvent build directory")
+link_directories(${UVENT_BUILD_PATH})
+
+option(ACCEPT_LOGS "Enable ACCEPT_LOGS" ON)
+
+file(GLOB_RECURSE MYLIBRARY_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
+
+add_definitions(
+        -DDEBUG_HEADERS=1
+        -DDEBUG_EXTENDED_INFO=0
+        -DALLOW_SIGPIPE=0
+        -DSPECIAL_FOR_USUB_THREAD_MANAGER=1
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=True
+)
+
+add_library(server SHARED
+
+    # Components/Compression
+    src/Components/Compression/gzip.cpp
+
+    # Components/Encodings
+    src/Components/Encodings/PercentEncoded.cpp
+
+    # Components/Headers
+    src/Protocols/HTTP/Headers.cpp
+
+    # Components/URL
+    src/Components/URL/QueryParams.cpp
+    src/Components/URL/URL.cpp
+
+    #Components/DataTypes
+    src/Components/DataTypes/Multipart/MultipartFormData.cpp
+
+    # Protocols/HTTP
+    src/Protocols/HTTP/EndpointHandler.cpp
+    src/Protocols/HTTP/RouterCommon.cpp
+    src/Protocols/HTTP/RadixRouter.cpp
+    
+    src/Protocols/HTTP/headers_lookup.cpp
+    src/Protocols/HTTP/HTTP1.cpp
+    src/Protocols/HTTP/Message.cpp
+    src/Protocols/HTTP/Middlewares.cpp
+
+    # Protocols/websocket
+    # Protocols/websocket/Websocket.cpp
+    # Protocols/websocket/WebsocketBase.cpp
+
+    # server
+    # server/client_handler.cpp
+    src/server/server.cpp
+
+    # utils
+    src/utils/globals.cpp
+    src/utils/utils.cpp
+    src/utils/configuration/ConfigReader.cpp
+    src/utils/crypto/SHA1.cpp
+    # utils/ssl/data.cpp
+    src/utils/toml/toml.cpp
+    src/utils/HTTPUtils/HTTPUtils.cpp
+)
+add_library(usub::server ALIAS server)
+
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Debug mode enabled")
+    #    add_definitions(-DUVENT_DEBUG)
+    #
+    #    include(FetchContent)
+    #    FetchContent_Declare(
+    #            spdlog
+    #            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    #            GIT_TAG v1.14.1
+    #            FIND_PACKAGE_ARGS
+    #    )
+    #    FetchContent_MakeAvailable(spdlog)
+endif ()
+
+
+#add_dependencies(${CURRENT_PROJECT_NAME} run_tests)
+find_package(ZLIB REQUIRED)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+
+    target_link_libraries(server PRIVATE
+            ZLIB::ZLIB
+            pthread
+            usub::uvent
+            #            spdlog::spdlog
+    )
+
+else()
+    target_link_libraries(server PUBLIC
+            ZLIB::ZLIB
+            pthread
+            usub::uvent
+    )
+endif ()
+
+# --------------------
+# INSTALL
+# -------------------
+
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
+target_include_directories(server 
+PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/server>
+)
+
+configure_package_config_file(
+    cmake/serverConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/serverConfig.cmake
+    INSTALL_DESTINATION lib/cmake/server
+)
+
+install(TARGETS server
+    EXPORT serverTargets
+    #LIBRARY DESTINATION lib
+    #ARCHIVE DESTINATION lib
+    #RUNTIME DESTINATION bin
+    PUBLIC_HEADER DESTINATION include/server
+    INCLUDES DESTINATION include/server
+)
+
+foreach(header ${MYLIBRARY_HEADERS})
+    get_filename_component(header_path ${header} DIRECTORY)
+    file(RELATIVE_PATH header_relative_path "${CMAKE_CURRENT_SOURCE_DIR}/include" ${header_path})
+    install(FILES ${header} DESTINATION include/server/${header_relative_path})
+endforeach()
+
+install(EXPORT serverTargets
+    FILE serverConfig.cmake
+    NAMESPACE usub::
+    DESTINATION lib/cmake/server
+)
+
+
+# ========================================
+# ======= BUILDING EXAMPLES =============
+# ========================================
+
+option(BUILD_EXAMPLES "Build the Server example executables" OFF)
+
+if(BUILD_EXAMPLES)
+    add_executable(BasicExample examples/SimpleServer.cpp)
+
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_link_libraries(BasicExample server ZLIB::ZLIB pthread usub::uvent spdlog::spdlog)
+    else()
+        target_link_libraries(BasicExample server ZLIB::ZLIB pthread usub::uvent)
+    endif()
+endif()
+
+# ========================================
+# ======= BUILDING TESTS =============
+# ========================================
+
+# PunycodeEncoding tests
+
+option(BUILD_TESTS "Build and run tests" OFF)
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
