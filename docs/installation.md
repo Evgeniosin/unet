@@ -21,7 +21,7 @@ Clone the repository:
 ```bash
 git clone https://github.com/Usub-development/webserver.git
 cd webserver
-````
+```
 
 Configure and build:
 

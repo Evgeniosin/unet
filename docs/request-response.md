@@ -12,7 +12,7 @@ You can access URL, query parameters, headers, body, and the request method.
 ```cpp
 std::string url = request.getURL();
 std::cout << "Path: " << url << std::endl;
-````
+```
 
 ### Get the Full URL (with query string)
 

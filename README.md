@@ -57,10 +57,6 @@ Full documentation:
 
 ## Roadmap
 
-* ✅ HTTP/1.0 / 1.1
-* 🚧 Extended tests & docs
-* 📅 Planned: HTTP/2, HTTP/3, WebSocket upgrades, streaming
-
 See [Roadmap](https://usub-development.github.io/webserver/roadmap/).
 
 ---
@@ -68,7 +64,6 @@ See [Roadmap](https://usub-development.github.io/webserver/roadmap/).
 ## Contributing
 
 We welcome contributions! Please see the [Contributing Guide](https://usub-development.github.io/webserver/contributing/).
-Coding style is documented [here](https://usub-development.github.io/webserver/contributing/#coding-style).
 
 ---
 
@@ -76,9 +71,3 @@ Coding style is documented [here](https://usub-development.github.io/webserver/c
 
 MIT
 
-```
-
----
-
-Would you like me to also add **badges** (CMake, C++23, Docs link, License) at the top, so it looks more professional at first glance?
-```
