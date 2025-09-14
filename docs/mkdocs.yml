@@ -72,7 +72,7 @@ nav:
  - Getting Started:
    - Installation: installation.md
    - Quick Start: quick-start.md
-   - Add a Middleware: middlwares.md
+   - Add a Middleware: middlewares.md
    - Work with Requests/Responses: request-response.md
 extra:
   social:
