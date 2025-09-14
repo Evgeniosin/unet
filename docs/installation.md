@@ -8,7 +8,7 @@ Windows support is not yet available.
   - GCC ≥ 12
   - Clang ≥ 15
 - **CMake** ≥ 3.22
-- (**Uvent**)[https://github.com/Usub-development/uvent.git]
+- [**Uvent**](https://github.com/Usub-development/uvent.git)
 
 Optional:
 - **OpenSSL** (for TLS support)

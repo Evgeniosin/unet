@@ -35,7 +35,7 @@ int main() {
     server.handle({"GET"}, "/hello", handler);
     server.run();
 }
-````
+```
 
 Run:
 
