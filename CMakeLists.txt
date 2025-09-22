@@ -23,18 +23,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 # Find uvent
 Find_Package(uvent REQUIRED)
 
-set(UVENT_PATH "$ENV{UVENT_PATH}" CACHE PATH "Path to the uvent directory")
-
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
 )
-
-include_directories(${server_SOURCE_DIR})
-
-set(UVENT_BUILD_PATH "$ENV{UVENT_BUILD_PATH}" CACHE PATH "Path to the uvent build directory")
-link_directories(${UVENT_BUILD_PATH})
-
-option(ACCEPT_LOGS "Enable ACCEPT_LOGS" ON)
 
 file(GLOB_RECURSE MYLIBRARY_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
 
