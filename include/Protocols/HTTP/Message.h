@@ -196,7 +196,9 @@ namespace usub::server::protocols::http {
          *
          * @return usub::server::component::Headers& Reference to the headers.
          */
-        usub::server::protocols::http::Headers &getHeaders();
+        usub::server::protocols::http::Headers &getHeaders() noexcept;
+        const usub::server::protocols::http::Headers &getHeaders() const noexcept;
+
 
         /**
          * @brief Retrieves a reference to the message data as a vector of unsigned characters.

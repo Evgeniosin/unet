@@ -2,7 +2,11 @@
 #include "Protocols/HTTP/EndpointHandler.h"
 
 
-usub::server::protocols::http::Headers &usub::server::protocols::http::Message::getHeaders() {
+usub::server::protocols::http::Headers &usub::server::protocols::http::Message::getHeaders() noexcept {
+    return this->headers_;
+}
+
+const usub::server::protocols::http::Headers &usub::server::protocols::http::Message::getHeaders() const noexcept {
     return this->headers_;
 }
 
