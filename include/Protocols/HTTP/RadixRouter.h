@@ -105,6 +105,13 @@ namespace usub::server::protocols::http {
 
         void insert(RadixNode *node, const std::vector<Segment> &segs, std::size_t idx, std::unique_ptr<Route> &route, bool has_trailing_slash);
 
+        bool matchDFS(RadixNode* node,
+                      const std::vector<std::string>& segs,
+                      std::size_t idx,
+                      Request& req,
+                      Route*& out,
+                      std::string* last_error);
+
         bool matchIter(RadixNode *node,
                        const std::vector<std::string> &segs,
                        Request &req,
