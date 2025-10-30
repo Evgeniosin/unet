@@ -141,7 +141,7 @@ namespace usub::server::protocols::http {
             return;
         } else if (cur.kind == Segment::Par) {
             for (ParamEdge &edge: node->param) {
-                if (edge.constraint && cur.constraint && edge.constraint->pattern == cur.constraint->pattern) {
+                if (edge.constraint && cur.constraint && edge.constraint->pattern == cur.constraint->pattern && edge.name == cur.name) {
                     insert(edge.child.get(), segs, idx + 1, route, has_trailing_slash);
                     return;
                 }
