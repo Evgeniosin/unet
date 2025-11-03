@@ -109,7 +109,8 @@ namespace usub::server::protocols::http {
         DATA_CONTENT_LENGTH = 7,
         DATA_CHUNKED_SIZE = 8,
         DATA_CHUNKED = 9,
-
+        ERROR = 10,
+        FINISHED = 11,
         SENDING = 50,
         SENDING_CONTENT_LENGTH = 51,
         SENDING_CHUNKED = 52,
@@ -722,8 +723,224 @@ namespace usub::server::protocols::http {
          * @return usub::uvent::task::Awaitable<void> Awaitable task representing the send operation.
          */
         usub::uvent::task::Awaitable<void> send();
+
+
+        template<VERSION version>
+        [[maybe_unused]] std::string::const_iterator parse(const std::string &data, std::string::const_iterator start_pos = {});
     };
 
 }// namespace usub::server::protocols::http
+
+template<usub::server::protocols::http::VERSION version>
+std::string::const_iterator usub::server::protocols::http::Response::parse(// TODO: Was Written by ChatGPT, without a second of thought put into this
+        const std::string &data, std::string::const_iterator start_pos) {
+
+    if constexpr (version != VERSION::HTTP_1_0 && version != VERSION::HTTP_1_1 && version != VERSION::HTTP_1_X) {
+        static_assert(version == VERSION::HTTP_1_0 || version == VERSION::HTTP_1_1 || version == VERSION::HTTP_1_X,
+                      "Unsupported HTTP version for response parser");
+        return {};
+    }
+
+    auto c = (start_pos == std::string::const_iterator()) ? data.begin() : start_pos;
+    RESPONSE_STATE &state = this->state_;
+    bool &carriage_return = this->carriage_return;
+
+    for (; c != data.end(); ++c, ++this->helper_.offset_) {
+        switch (state) {
+            case RESPONSE_STATE::VERSION:
+                if (*c == ' ') {
+                    if (this->data_value_pair_.first.empty()) {
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;// malformed: empty version
+                    }
+                    if (this->data_value_pair_.first == "HTTP/1.0") {
+                        this->http_version_ = VERSION::HTTP_1_0;
+                    } else if (this->data_value_pair_.first == "HTTP/1.1") {
+                        this->http_version_ = VERSION::HTTP_1_1;
+                    } else {
+                        this->http_version_ = VERSION::BROKEN;
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;
+                    }
+                    this->data_value_pair_.first.clear();
+                    state = RESPONSE_STATE::STATUS_CODE;
+                    continue;
+                } else if (*c == '\r' || *c == '\n') {
+                    this->state_ = RESPONSE_STATE::ERROR;
+                    return c;// malformed: premature CRLF
+                } else {
+                    this->data_value_pair_.first.push_back(*c);
+                }
+                break;
+
+            case RESPONSE_STATE::STATUS_CODE:
+                if (*c == ' ') {
+                    if (this->data_value_pair_.first.empty()) {
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;// malformed: empty status code
+                    }
+                    this->status_code_ = std::move(this->data_value_pair_.first);
+                    this->data_value_pair_.first.clear();
+                    state = RESPONSE_STATE::STATUS_MESSAGE;
+                    continue;
+                } else if (!std::isdigit(*c)) {
+                    this->state_ = RESPONSE_STATE::ERROR;
+                    return c;// malformed: status code must be numeric
+                } else {
+                    this->data_value_pair_.first.push_back(*c);
+                }
+                break;
+
+            case RESPONSE_STATE::STATUS_MESSAGE:
+                if (*c == '\r') {
+                    carriage_return = true;
+                } else if (*c == '\n') {
+                    if (!carriage_return) {
+                        this->state_ = RESPONSE_STATE::SENT;
+                        return c;// malformed: \n without \r
+                    }
+                    if (this->data_value_pair_.first.empty()) {
+                        this->state_ = RESPONSE_STATE::SENT;
+                        return c;// malformed: missing status message
+                    }
+                    this->status_message_ = std::move(this->data_value_pair_.first);
+                    this->data_value_pair_.first.clear();
+                    carriage_return = false;
+                    state = RESPONSE_STATE::HEADERS_KEY;
+                    return ++c;// exit here after full status line
+                } else if (std::iscntrl(*c)) {
+                    this->state_ = RESPONSE_STATE::ERROR;
+                    return c;// malformed: control char in message
+                } else {
+                    carriage_return = false;
+                    this->data_value_pair_.first.push_back(*c);
+                }
+                break;
+            case RESPONSE_STATE::HEADERS_KEY:
+                if (*c == '\r') {
+                    carriage_return = true;
+                    break;
+                } else if (*c == '\n') {
+                    if (carriage_return) {
+                        carriage_return = false;
+                        state = RESPONSE_STATE::HEADERS_PARSED;
+                        return ++c;// headers done
+                    } else {
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;// malformed: \n without \r
+                    }
+                } else if (*c == ':') {
+                    if (this->data_value_pair_.first.empty()) {
+                        this->state_ = RESPONSE_STATE::SENT;
+                        return c;// malformed: empty header key
+                    }
+                    state = RESPONSE_STATE::HEADERS_VALUE;
+                } else if (std::iscntrl(*c)) {
+                    this->state_ = RESPONSE_STATE::ERROR;
+                    return c;// malformed: control char in header key
+                } else {
+                    this->data_value_pair_.first.push_back(std::tolower(*c));
+                }
+                break;
+
+            case RESPONSE_STATE::HEADERS_VALUE:
+                if (*c == '\r') {
+                    carriage_return = true;
+                } else if (*c == '\n') {
+                    if (!carriage_return) {
+                        this->state_ = RESPONSE_STATE::SENT;
+                        return c;// malformed: \n without \r
+                    }
+                    this->headers_.addHeader<usub::server::protocols::http::Response>(std::move(this->data_value_pair_.first), std::move(this->data_value_pair_.second));
+                    this->data_value_pair_.first.clear();
+                    this->data_value_pair_.second.clear();
+                    carriage_return = false;
+                    state = RESPONSE_STATE::HEADERS_KEY;
+                } else {
+                    carriage_return = false;
+                    this->data_value_pair_.second.push_back(*c);
+                }
+                break;
+            case RESPONSE_STATE::HEADERS_PARSED: {
+                this->line_size_ = 0;
+                auto &headers = this->headers_;
+                auto &content_length_vec = headers["content-length"];
+                auto &transfer_encoding_vec = headers["transfer-encoding"];
+                auto content_length = content_length_vec.size() == 1 ? std::stoi(content_length_vec[0]) : 0;
+
+                int code = std::stoi(this->status_code_);
+                if (code == 204 || code == 304 || (code >= 100 && code < 200)) {
+                    this->state_ = RESPONSE_STATE::FINISHED;
+                    return c;// no body expected
+                }
+
+                if (content_length > 0) {
+                    this->helper_.size_ = content_length;
+                    this->state_ = RESPONSE_STATE::DATA_CONTENT_LENGTH;
+                } else if (!transfer_encoding_vec.empty()) {
+                    if (transfer_encoding_vec.back() == "chunked") {
+                        this->state_ = RESPONSE_STATE::DATA_CHUNKED_SIZE;
+                    } else {
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;// malformed: unsupported transfer encoding
+                    }
+                } else {
+                    this->state_ = RESPONSE_STATE::FINISHED;
+                    return c;// malformed: no content-length or chunked
+                }
+                break;
+            }
+            case RESPONSE_STATE::DATA_CONTENT_LENGTH:
+                if (this->line_size_ < this->helper_.size_) {
+                    this->body_.push_back(*c);
+                    ++this->line_size_;
+                    if (this->line_size_ == this->helper_.size_) {
+                        this->state_ = RESPONSE_STATE::SENT;
+                        return ++c;
+                    }
+                } else {
+                    this->state_ = RESPONSE_STATE::SENT;
+                    return c;// too much data
+                }
+                break;
+
+            case RESPONSE_STATE::DATA_CHUNKED_SIZE:
+                if (*c == '\r') {
+                    carriage_return = true;
+                } else if (*c == '\n') {
+                    if (!carriage_return) {
+                        this->state_ = RESPONSE_STATE::ERROR;
+                        return c;// malformed newline
+                    }
+                    this->helper_.size_ = std::stoul(this->data_value_pair_.first, nullptr, 16);
+                    this->data_value_pair_.first.clear();
+                    carriage_return = false;
+                    if (this->helper_.size_ == 0) {
+                        this->state_ = RESPONSE_STATE::FINISHED;
+                        return ++c;
+                    } else {
+                        this->line_size_ = 0;
+                        this->state_ = RESPONSE_STATE::DATA_CHUNKED;
+                    }
+                } else {
+                    this->data_value_pair_.first.push_back(*c);
+                }
+                break;
+
+            case RESPONSE_STATE::DATA_CHUNKED:
+                this->body_.push_back(*c);
+                ++this->line_size_;
+                if (this->line_size_ == this->helper_.size_) {
+                    this->state_ = RESPONSE_STATE::DATA_CHUNKED_SIZE;
+                }
+                break;
+
+            default:
+                return c;
+        }
+    }
+
+    return c;
+}
 
 #endif// HTTP_MESSAGE_H
