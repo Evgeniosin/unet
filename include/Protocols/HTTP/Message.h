@@ -23,6 +23,7 @@
 #include "Protocols/HTTP/Headers.h"
 #include "utils/HTTPUtils/HTTPUtils.h"
 #include "utils/utils.h"
+#include "uvent/tasks/Awaitable.h"
 
 
 namespace usub::server::protocols::http {
@@ -40,9 +41,10 @@ namespace usub::server::protocols::http {
         HTTP_0_9 = 1,///< HTTP/0.9.
         HTTP_1_0 = 2,///< HTTP/1.0.
         HTTP_1_1 = 3,///< HTTP/1.1.
-        HTTP_2_0 = 4,///< HTTP/2.0.
-        HTTP_3_0 = 5,///< HTTP/3.0.
-        BROKEN = 6   ///< Indicates a broken or unsupported HTTP version.
+        HTTP_1_X = 4,///< HTTP/1.1.
+        HTTP_2_0 = 5,///< HTTP/2.0.
+        HTTP_3_0 = 6,///< HTTP/3.0.
+        BROKEN = 10  ///< Indicates a broken or unsupported HTTP version.
     };
 
     /**
@@ -491,6 +493,7 @@ namespace usub::server::protocols::http {
          *  
          */
         [[maybe_unused]] std::string::const_iterator parseHTTP1_X(const std::string &request, std::string::const_iterator start_pos = {});
+        usub::uvent::task::Awaitable<bool> parseHTTP1_X_yield(const std::string &request);
 
         /**
          * @brief Parses an HTTP/2.0 request.
@@ -564,6 +567,11 @@ namespace usub::server::protocols::http {
      */
     class Response : public Message {
     private:
+        // TODO: Temporary stuff
+        bool carriage_return{}, newline{};
+        size_t line_size_{};
+
+
         /**
          * @brief HTTP status code as a string. default: "500".
          */

@@ -27,7 +27,6 @@ FetchContent_Declare(
     uvent 
     GIT_REPOSITORY https://github.com/Usub-development/uvent.git
     GIT_TAG v3.0.3
-    FIND_PACKAGE_ARGS
 )
 
 FetchContent_MakeAvailable(uvent)
@@ -75,7 +74,6 @@ add_library(server SHARED
     src/server/server.cpp
 
     # utils
-    src/utils/globals.cpp
     src/utils/utils.cpp
     src/utils/configuration/ConfigReader.cpp
     src/utils/crypto/SHA1.cpp
@@ -173,7 +171,7 @@ if(BUILD_EXAMPLES)
     add_executable(BasicExample examples/SimpleServer.cpp)
 
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_link_libraries(BasicExample server ZLIB::ZLIB pthread usub::uvent spdlog::spdlog)
+        target_link_libraries(BasicExample server ZLIB::ZLIB pthread usub::uvent) # spdlog::spdlog
     else()
         target_link_libraries(BasicExample server ZLIB::ZLIB pthread usub::uvent)
     endif()

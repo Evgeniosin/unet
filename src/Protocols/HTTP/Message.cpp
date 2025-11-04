@@ -948,3 +948,482 @@ void usub::server::protocols::http::Response::clear() {
 //
 //    co_return;
 //}
+
+
+usub::uvent::task::Awaitable<bool> usub::server::protocols::http::Request::parseHTTP1_X_yield(const std::string &request) {
+    if (request.empty()) {
+        this->state_ = REQUEST_STATE::BAD_REQUEST;
+        co_return true;
+    }
+
+    auto c = request.begin();
+
+
+    // Local vars have better perfomance, so we cache the most used, TODO!
+    std::pair<std::string, std::string> &data_value_pair_cached = this->data_value_pair_;
+    REQUEST_STATE &state_cached = this->state_;
+    size_t &line_size_cached = this->line_size_;
+
+    for (c; c != request.end();) {
+        if (this->line_size_ >= 8192 && this->state_ < REQUEST_STATE::DATA_CONTENT_LENGTH) {
+            if (this->state_ == REQUEST_STATE::METHOD || this->state_ == REQUEST_STATE::PATH || this->state_ == REQUEST_STATE::VERSION) {
+                this->state_ = REQUEST_STATE::URI_TOO_LONG;
+                co_return true;
+            } else if (this->state_ == REQUEST_STATE::HEADERS_KEY || this->state_ == REQUEST_STATE::HEADERS_VALUE) {
+                this->state_ = REQUEST_STATE::REQUEST_HEADER_FIELDS_TOO_LARGE;
+                co_return true;
+            }
+            this->state_ = REQUEST_STATE::BAD_REQUEST;
+            co_return true;
+        } else if (this->line_size_ > this->max_data_size_) {
+            this->state_ = REQUEST_STATE::BAD_REQUEST;
+            co_return true;
+        }
+        switch (this->state_) {
+            case REQUEST_STATE::METHOD:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::METHOD; ++c, this->line_size_++) {
+                    if (usub::utils::isTchar(*c)) [[likely]] {
+                        this->method_token_ += *c;// Append character
+                    } else if (*c == ' ') {
+                        if (this->method_token_.empty()) {
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            break;
+                        }
+                        this->state_ = REQUEST_STATE::TARGET_START;
+                    } else [[unlikely]] {
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;
+                    }
+                }
+            case REQUEST_STATE::TARGET_START:
+                if (*c == '/') [[likely]] {
+                    this->state_ = REQUEST_STATE::ORIGIN_FORM;
+                } else if (*c == '*') [[unlikely]] {
+                    // not ready yet
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                    this->urn_.getPath().push_back('*');
+                    this->state_ = REQUEST_STATE::ASTERISK_FORM;
+                    c++;
+                } else if (isalpha(*c)) {// Check for scheme (e.g., "http://")
+                                         // not ready yet
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                    this->state_ = REQUEST_STATE::ABSOLUTE_FORM_SCHEME;
+                } else [[unlikely]] {
+                    // not ready yet
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                    this->state_ = REQUEST_STATE::AUTHORITY_FORM;
+                }
+                break;
+            case REQUEST_STATE::ORIGIN_FORM: {
+                std::string &url = this->urn_.getPath();
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::ORIGIN_FORM && this->line_size_ <= this->max_uri_size_; ++c, this->line_size_++) {
+                    if (component::URN::isPathChar(*c)) [[likely]] {
+                        url.push_back(*c);
+                    } else if (*c == '?') [[likely]] {
+                        this->state_ = REQUEST_STATE::QUERY_KEY;
+                    } else if (*c == ' ') [[likely]] {
+                        this->state_ = REQUEST_STATE::VERSION;
+                    } else [[unlikely]] {
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;
+                    }
+                }
+                break;
+            }
+            case REQUEST_STATE::ASTERISK_FORM:
+                if (*c == ' ') [[likely]] {
+                    this->state_ = REQUEST_STATE::VERSION;
+                } else [[unlikely]] {
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                }
+                c++;
+                break;
+            case REQUEST_STATE::QUERY_KEY: {
+                std::string &query_params_string = this->urn_.getQueryParams().string();
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::QUERY_KEY; ++c, ++this->line_size_) {
+                    if (component::URN::isQueryChar(*c)) [[likely]] {
+                        query_params_string.push_back(*c);
+                        if (*c != '=') [[likely]] {
+                            this->data_value_pair_.first.push_back(*c);
+                        } else if (*c == '&') [[unlikely]] {
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        } else {
+                            this->state_ = REQUEST_STATE::QUERY_VALUE;
+                        }
+                    } else [[unlikely]] {
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;
+                    }
+                }
+                break;
+            }
+            case REQUEST_STATE::QUERY_VALUE: {
+                usub::server::component::url::QueryParams &query_params = this->urn_.getQueryParams();
+                std::string &query_params_string = query_params.string();
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::QUERY_VALUE; ++c, this->line_size_++) {
+                    if (component::URN::isQueryChar(*c)) [[likely]] {
+                        query_params_string.push_back(*c);
+                        if (*c != '&') [[likely]] {
+                            this->data_value_pair_.second.push_back(*c);
+                        } else {
+                            query_params.addQueryParam(std::move(this->data_value_pair_.first), std::move(this->data_value_pair_.second));
+                            this->data_value_pair_.first.clear();
+                            this->data_value_pair_.second.clear();
+                            this->state_ = REQUEST_STATE::QUERY_KEY;
+                        }
+                    } else if (*c == ' ') [[likely]] {
+                        query_params.addQueryParam(std::move(this->data_value_pair_.first), std::move(this->data_value_pair_.second));
+                        this->data_value_pair_.first.clear();
+                        this->data_value_pair_.second.clear();
+                        this->state_ = REQUEST_STATE::VERSION;
+                    } else [[unlikely]] {
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;
+                    }
+                }
+                break;
+            }
+            // this is unused, since it's never transfered to server still usefull to have
+            case REQUEST_STATE::FRAGMENT: {
+                std::string &fragment = this->urn_.getFragment();
+                switch (*c) {
+                    case '\r':
+                    case '\n':
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;// Incorrect character in fragment
+                    case ' ':
+                        this->state_ = REQUEST_STATE::VERSION;
+                        break;
+                    default:
+                        fragment.push_back(*c);
+                        break;
+                }
+                break;
+            }
+            case REQUEST_STATE::VERSION:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::VERSION; ++c, ++this->line_size_) {
+                    switch (*c) {
+                        case ' ':
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case '\r':
+                            if (!carriage_return) [[likely]] {
+                                carriage_return = true;
+                                break;
+                            }
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case '\n':
+                            if (!carriage_return) {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            // TODO: May compare using int comparison instead of string comparison
+                            if (this->data_value_pair_.first == "HTTP/1.1") [[likely]] {
+                                this->http_version_ = VERSION::HTTP_1_1;
+                            } else if (this->data_value_pair_.first == "HTTP/1.0") [[likely]] {
+                                this->http_version_ = VERSION::HTTP_1_0;
+                            } else [[unlikely]] {
+                                this->http_version_ = VERSION::BROKEN;
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            this->data_value_pair_.first.clear();
+                            this->line_size_ = 0;
+                            this->state_ = REQUEST_STATE::PRE_HEADERS;
+                            co_yield false;
+                            break;
+                        default:
+                            if (this->line_size_ > this->max_uri_size_) [[unlikely]] {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                break;
+                            }
+
+                            this->data_value_pair_.first.push_back(*c);
+                            break;
+                    }
+                }
+                break;
+            case REQUEST_STATE::PRE_HEADERS:
+                this->carriage_return = false;
+                c++;
+                this->state_ = REQUEST_STATE::HEADERS_KEY;
+            case REQUEST_STATE::HEADERS_KEY:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::HEADERS_KEY && this->line_size_ <= this->max_headers_size_;) {
+                    switch (*c) {
+                        case ' ':
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case '\r':
+                            if (!carriage_return) [[likely]] {
+                                this->carriage_return = true;
+                                c++;
+                                this->line_size_++;
+                                break;
+                            }
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case '\n':
+                            if (carriage_return) [[likely]] {
+                                this->state_ = REQUEST_STATE::HEADERS_PARSED;
+                                co_yield false;
+
+                                break;
+                            }
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case ':':
+                            if (!this->data_value_pair_.first.empty()) [[likely]] {
+                                this->state_ = REQUEST_STATE::HEADERS_VALUE;
+                            } else [[unlikely]] {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            c++;
+                            this->line_size_++;
+                            break;
+                        default:
+                            if (this->carriage_return) [[unlikely]] {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            if (usub::utils::isTchar(*c)) [[likely]] {
+                                this->data_value_pair_.first.push_back(std::tolower(*c));
+                            } else [[unlikely]] {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            c++;
+                            this->line_size_++;
+
+                            break;
+                    }
+                }
+                break;
+            case REQUEST_STATE::HEADERS_VALUE:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::HEADERS_VALUE && this->line_size_ <= this->max_headers_size_; ++c, ++this->line_size_) {
+                    switch (*c) {
+                        case '\r':
+                            if (!carriage_return) [[likely]] {
+                                this->carriage_return = true;
+                                break;
+                            }
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case '\n':
+                            if (this->carriage_return && !this->data_value_pair_.second.empty()) [[likely]] {
+                                auto result = this->headers_.addHeader<Request>(std::move(this->data_value_pair_.first), std::move(data_value_pair_.second));
+                                if (!result) [[unlikely]] {
+                                    const usub::server::utils::error::ParseError &err = result.error();
+                                    if (err.severity == usub::server::utils::error::ErrorSeverity::Critical) {
+                                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                        co_return true;
+                                    }
+                                }
+                                this->data_value_pair_.first.clear();
+                                this->data_value_pair_.second.clear();
+                                this->carriage_return = false;
+                                this->state_ = REQUEST_STATE::HEADERS_KEY;
+                                break;
+                            }
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        case ' ':
+                            this->data_value_pair_.second.push_back(*c);
+                            break;
+                        default:
+                            if (usub::utils::isVcharOrObsText(*c)) {
+                                this->data_value_pair_.second.push_back(*c);
+                            } else {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            break;
+                    }
+                }
+                break;
+            case REQUEST_STATE::HEADERS_PARSED: {
+                this->line_size_ = 0;
+                auto headers = this->headers_;
+                auto content_length = headers[usub::server::component::HeaderEnum::Content_Length].size() == 1 ? std::stoi(headers[usub::server::component::HeaderEnum::Content_Length][0]) : -1;
+                if (content_length > 0) [[likely]] {
+                    this->helper_.size_ = content_length;
+                    this->state_ = REQUEST_STATE::DATA_CONTENT_LENGTH;
+                } else if (content_length == 0) [[unlikely]] {
+                    this->helper_.size_ = 0;
+                    this->state_ = REQUEST_STATE::FINISHED;
+                } else if (!headers[usub::server::component::HeaderEnum::Transfer_Encoding].empty()) [[likely]] {
+                    if (headers[usub::server::component::HeaderEnum::Transfer_Encoding].back() == "chunked") {
+                        this->state_ = REQUEST_STATE::DATA_CHUNKED_SIZE;
+                    } else {
+                        this->state_ = REQUEST_STATE::UNSUPPORTED_MEDIA_TYPE;
+                        co_return true;
+                    }
+                } else if (this->method_token_ == "GET" || this->method_token_ == "HEAD") [[likely]] {
+                    this->state_ = REQUEST_STATE::FINISHED;
+                } else {
+                    this->state_ = REQUEST_STATE::LENGTH_REQUIRED;
+                    co_return true;
+                }
+                // size_t amount_of_encodings = 0;
+                // auto& transfer_encoding = headers[usub::server::component::HeaderEnum::Transfer_Encoding]
+                // if (!headers.Transfer_Encoding.empty()) {
+                //     if (headers.Transfer_Encoding.size() != 1) {
+                //         amount_of_encodings += headers.Transfer_Encoding.size();
+                //         if (amount_of_encodings > 2) {
+                //             this->state_ = REQUEST_STATE::BAD_REQUEST;
+                //             return c;
+                //         }
+                //         DecoderChainFactory::instance().create(headers.Transfer_Encoding, this->encryptors_chain);
+                //     }
+                // }
+                // if (!headers.Content_Encoding.empty()) {
+                //     amount_of_encodings += headers.Content_Encoding.size();
+                //     if (amount_of_encodings > 2 + 2) {
+                //         this->state_ = REQUEST_STATE::BAD_REQUEST;
+                //         return c;
+                //     }
+                //     DecoderChainFactory::instance().create(headers.Content_Encoding, this->encryptors_chain);
+                // }
+                carriage_return = false;
+                c++;
+                break;
+            }
+            case REQUEST_STATE::DATA_CONTENT_LENGTH:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::DATA_CONTENT_LENGTH && this->line_size_ <= this->max_data_size_; ++c, ++line_size_) {
+
+                    this->body_.push_back(*c);
+                    if (this->body_.size() == this->helper_.size_) {
+                        for (auto decompressor: this->encryptors_chain) {
+                            decompressor->decompress(this->body_);
+                            if (decompressor->getState() != 2) {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            } else {
+                                this->state_ = REQUEST_STATE::FINISHED;
+                                co_return true;
+                            }
+                        }
+                        this->state_ = REQUEST_STATE::FINISHED;
+                        co_return true;
+                    } else if (this->body_.size() > this->helper_.size_) {
+                        this->state_ = REQUEST_STATE::BAD_REQUEST;
+                        co_return true;
+                    }
+                }
+                if (this->line_size_ > this->max_data_size_) {
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                }
+                break;
+            case REQUEST_STATE::DATA_FRAGMENT:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::DATA_FRAGMENT && this->line_size_ <= this->max_data_size_; ++c, ++line_size_) {
+                    if (*c == '\r') {
+                        if (this->carriage_return) {
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        }
+                        this->carriage_return = true;
+                    }
+                    if (*c == '\n') {
+                        if (!this->carriage_return) {
+                            this->state_ = REQUEST_STATE::BAD_REQUEST;
+                            co_return true;
+                        }
+                        this->carriage_return = false;
+                        this->body_ = std::move(this->data_value_pair_.first);
+                        this->data_value_pair_.first.clear();
+                        this->state_ = REQUEST_STATE::DATA_CHUNKED_SIZE;
+                    }
+                }
+                if (this->line_size_ > this->max_data_size_) {
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                }
+
+            case REQUEST_STATE::DATA_CHUNKED_SIZE:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::DATA_CHUNKED_SIZE && this->line_size_ <= this->max_data_size_; ++c, ++line_size_) {
+                    switch (*c) {
+                        case '\r':
+                            if (carriage_return) {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            carriage_return = true;
+                            break;
+                        case '\n':
+                            if (!carriage_return) {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            if (this->newline && !this->body_.empty() && this->carriage_return && this->helper_.size_ == 0) {
+                                this->state_ = REQUEST_STATE::FINISHED;
+                            }
+                            this->helper_.size_ = std::stoull(this->data_value_pair_.first, nullptr, 16);
+                            if ((this->line_size_ + this->helper_.size_) > this->max_data_size_) {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            if (this->helper_.size_ != 0) {
+                                this->data_value_pair_.first.clear();
+                                this->newline = false;
+                                this->carriage_return = false;
+                                this->state_ = REQUEST_STATE::DATA_CHUNKED;
+                            } else {
+                                this->newline = true;
+                                this->carriage_return = false;
+                            }
+                            break;
+                        default:
+                            if (std::isxdigit(*c)) {
+                                this->data_value_pair_.first.push_back(*c);
+                            } else {
+                                this->state_ = REQUEST_STATE::BAD_REQUEST;
+                                co_return true;
+                            }
+                            break;
+                    }
+                }
+                if (this->line_size_ > this->max_data_size_) {
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    co_return true;
+                }
+
+                break;
+            case REQUEST_STATE::DATA_CHUNKED:
+                for (c; c != request.end() && this->state_ == REQUEST_STATE::DATA_CHUNKED && this->line_size_ <= this->max_data_size_; ++c, ++line_size_) {
+                    this->data_value_pair_.first.push_back(*c);
+                    if (this->data_value_pair_.first.size() == this->helper_.size_) {
+                        for (auto decompressor: this->encryptors_chain) {
+                            decompressor->decompress(this->data_value_pair_.first);
+                            if (decompressor->getState() == 2) {
+                                this->state_ = REQUEST_STATE::DATA_FRAGMENT;
+                                co_yield false;
+                            } else {
+                                this->state_ = REQUEST_STATE::DATA_CHUNKED_SIZE;
+                                co_yield false;
+                            }
+                        }
+                        this->state_ = REQUEST_STATE::DATA_FRAGMENT;
+                        c++;
+                        co_return true;
+                    }
+                }
+                if (this->line_size_ > this->max_data_size_) {
+                    this->state_ = REQUEST_STATE::BAD_REQUEST;
+                    c = request.end();
+                    co_return true;
+                }
+                break;
+            default:
+                c = request.end();
+                break;
+        }
+    }
+    co_return true;
+}
