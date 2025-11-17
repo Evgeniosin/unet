@@ -1643,14 +1643,31 @@ namespace usub::server {
                 }
                 return rv;
             }
+
+            // find by enum
+            Iterator find(usub::server::component::HeaderEnum key) const {
+                auto k_it = known_headers_map_.find(key);
+                if (k_it != known_headers_map_.end()) {
+                    // construct iterator positioned at this known element
+                    return Iterator(Iterator::Phase::Known,
+                                    k_it, known_headers_map_.end(),
+                                    unknown_headers_map_.begin(), unknown_headers_map_.end());
+                }
+                // not found in known; check unknown -> return appropriate begin of unknown if present
+                if (!unknown_headers_map_.empty()) {
+                    // return iterator positioned at first unknown element (we want end if not found)
+                    return Iterator(Iterator::Phase::Unknown,
+                                    known_headers_map_.end(), known_headers_map_.end(),
+                                    unknown_headers_map_.begin(), unknown_headers_map_.end());
+                }
+                return end();
+            }
+
+
             // ========== Iterator Logic ==========
 
             class Iterator {
             private:
-                enum class Phase { Known,
-                                   Unknown,
-                                   End };
-
                 std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator known_it_;
                 std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator known_end_;
                 std::unordered_map<std::string, std::vector<std::string>>::const_iterator unknown_it_;
@@ -1658,6 +1675,10 @@ namespace usub::server {
                 Phase phase_;
 
             public:
+                enum class Phase { Known,
+                                   Unknown,
+                                   End };
+
                 Iterator(
                         std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator k_it,
                         std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator k_end,
@@ -1672,6 +1693,14 @@ namespace usub::server {
                         phase_ = Phase::End;
                     }
                 }
+
+                Iterator(
+                        Phase phase,
+                        std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator k_it,
+                        std::unordered_map<usub::server::component::HeaderEnum, std::vector<std::string>>::const_iterator k_end,
+                        std::unordered_map<std::string, std::vector<std::string>>::const_iterator u_it,
+                        std::unordered_map<std::string, std::vector<std::string>>::const_iterator u_end)
+                    : known_it_(k_it), known_end_(k_end), unknown_it_(u_it), unknown_end_(u_end), phase_(phase) {}
 
                 Iterator &operator++() {
                     if (phase_ == Phase::Known) {
@@ -1719,6 +1748,42 @@ namespace usub::server {
                 return Iterator(
                         known_headers_map_.end(), known_headers_map_.end(),
                         unknown_headers_map_.end(), unknown_headers_map_.end());
+            }
+
+            Iterator find(usub::server::component::HeaderEnum key) const {
+                auto k_it = known_headers_map_.find(key);
+                if (k_it != known_headers_map_.end()) {
+                    // construct iterator positioned at this known element
+                    return Iterator(Iterator::Phase::Known,
+                                    k_it, known_headers_map_.end(),
+                                    unknown_headers_map_.begin(), unknown_headers_map_.end());
+                }
+                // not found in known; check unknown -> return appropriate begin of unknown if present
+                if (!unknown_headers_map_.empty()) {
+                    // return iterator positioned at first unknown element (we want end if not found)
+                    return Iterator(Iterator::Phase::Unknown,
+                                    known_headers_map_.end(), known_headers_map_.end(),
+                                    unknown_headers_map_.begin(), unknown_headers_map_.end());
+                }
+                return end();
+            }
+
+            // find by string key (case-insensitive for known lookup)
+            Iterator find(std::string_view key) const {
+                // try known headers via lookup
+                auto lookup = HTTPHeaderLookup::lookupHeader(key.data(), key.size());
+                if (lookup) {
+                    return find(lookup->id);
+                }
+                // not a known header: try unknown map (case-insensitive keys stored lowercased)
+                std::string lower_key = usub::utils::toLower(std::string(key));
+                auto u_it = unknown_headers_map_.find(lower_key);
+                if (u_it != unknown_headers_map_.end()) {
+                    return Iterator(Iterator::Phase::Unknown,
+                                    known_headers_map_.end(), known_headers_map_.end(),
+                                    u_it, unknown_headers_map_.end());
+                }
+                return end();
             }
         };
 
