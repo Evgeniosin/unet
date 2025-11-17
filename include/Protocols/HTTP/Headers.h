@@ -1695,6 +1695,24 @@ namespace usub::server {
                     return *this;
                 }
 
+                bool operator==(const Iterator &other) const {
+                    if (phase_ != other.phase_) {
+                        return false;
+                    }
+
+                    switch (phase_) {
+                        case Phase::Known:
+                            return known_it_ == other.known_it_;
+                        case Phase::Unknown:
+                            return unknown_it_ == other.unknown_it_;
+                        case Phase::End:
+                            return known_it_ == other.known_it_ &&
+                                   unknown_it_ == other.unknown_it_;
+                    }
+
+                    return false;
+                }
+
                 bool operator!=(const Iterator &other) const {
                     return phase_ != other.phase_ ||
                            known_it_ != other.known_it_ ||
