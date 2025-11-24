@@ -18,7 +18,10 @@ namespace usub::client {
         usub::server::protocols::http::Response response_;
 
     public:
-        HttpClient() = default;
+        HttpClient() {
+            // this->request_.setState(usub::server::protocols::http::REQUEST_STATE::INITIALIZED);
+            this->response_.setState(usub::server::protocols::http::RESPONSE_STATE::VERSION);
+        }
         HttpClient(std::string url) {
             connect(url);
         }
@@ -85,6 +88,11 @@ namespace usub::client {
                     std::cout << "Response chunk:\n"
                               << response_text << std::flush;
                     response_.parse<usub::server::protocols::http::VERSION::HTTP_1_X>(response_text);
+                }
+
+                if (response_.getState() == usub::server::protocols::http::RESPONSE_STATE::FINISHED) {
+                    std::cout << "Finished\n";
+                    break; 
                 }
                 buffer.clear();
             }

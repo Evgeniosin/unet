@@ -54,7 +54,7 @@ int main() {
 
 	// Adjust the URL/port if your server listens elsewhere
 	const std::string url = "https://example.com"; // matches config/https.toml non-SSL listener
-	const std::string path = "/hello";               // endpoint from SimpleServer example
+	const std::string path = "";               // endpoint from SimpleServer example
 
 	// Create event loop with a single thread and schedule the client coroutine
 	auto uvent = std::make_shared<usub::Uvent>(1);

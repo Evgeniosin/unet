@@ -915,6 +915,10 @@ size_t usub::server::protocols::http::Response::size() const {
     return size_t(8192);
 }
 
+void usub::server::protocols::http::Response::setState(const RESPONSE_STATE &state) {
+    this->state_ = state;
+}
+
 void usub::server::protocols::http::Response::clear() {
     this->status_code_ = "500";
     this->status_message_ = "Internal Server Error";

@@ -646,6 +646,9 @@ namespace usub::server::protocols::http {
          */
         Response &setRoute(Route *route);
 
+
+        void setState(const RESPONSE_STATE &state);
+
         /**
          * @brief Adds a header to the response.
          *
@@ -905,15 +908,15 @@ std::string::const_iterator usub::server::protocols::http::Response::parse(// TO
                 break;
             }
             case RESPONSE_STATE::DATA_CONTENT_LENGTH:
-                if (this->line_size_ < this->helper_.size_) {
+                if (this->line_size_ <= this->helper_.size_) {
                     this->body_.push_back(*c);
                     ++this->line_size_;
-                    if (this->line_size_ == this->helper_.size_) {
-                        this->state_ = RESPONSE_STATE::SENT;
+                    if (this->line_size_ == this->helper_.size_ - 1) {
+                        this->state_ = RESPONSE_STATE::FINISHED;
                         return ++c;
                     }
                 } else {
-                    this->state_ = RESPONSE_STATE::SENT;
+                    this->state_ = RESPONSE_STATE::FINISHED;
                     return c;// too much data
                 }
                 break;
