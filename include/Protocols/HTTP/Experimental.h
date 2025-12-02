@@ -9,42 +9,6 @@
 
 namespace usub::server::experimental {
 
-    /**
-     * @enum VERSION
-     * @brief Enumerates supported HTTP versions.
-     */
-    enum class VERSION : uint16_t {
-        NONE = 0,     ///< No HTTP version specified. Error state.
-        HTTP_0_9 = 9, ///< HTTP/0.9.
-        HTTP_1_0 = 10,///< HTTP/1.0.
-        HTTP_1_1 = 11,///< HTTP/1.1.
-        HTTP_2_0 = 20,///< HTTP/2.0.
-        HTTP_3_0 = 30 ///< HTTP/3.0.
-    };
-
-    struct Settings {
-        std::string method;            // Method is a string as the implementation before
-        std::string path;              // URI class
-        std::string scheme;            // h2/h3 can fill it out, h1 requires manual
-        std::string authority;         // h2/h3 or Host for h1
-        VERSION version{VERSION::NONE};// h1 can fill it out, h2,h3 requires manual feeding
-    };
-
-    enum class PARSE_PHASE : uint8_t {
-        START_LINE,  // parsing method/path/version (H1) or pseudo (H2/H3)
-        HEADER_NAME, // currently accumulating header name fragments
-        HEADER_VALUE,// currently accumulating header value fragments
-        HEADER_FIELD,// just finished a header field
-        HEADERS_DONE,// saw CRLFCRLF (H1) / END_HEADERS (H2/H3)
-        BODY_CHUNK,  // feeding a body fragment
-        DONE
-    };
-
-    struct ParseErrorInfo {
-        int code = 0;       // your internal error code
-        std::string message;// textual explanation
-    };
-
     struct ParseProgress {
         PARSE_PHASE phase{PARSE_PHASE::START_LINE};
         std::size_t header_count{0};
@@ -52,7 +16,7 @@ namespace usub::server::experimental {
         std::size_t body_bytes{0};
         std::optional<std::size_t> content_length_expected;
 
-        // current in-flight header (fragment-friendly)
+        // current in-flight header 
         std::string cur_header_name;
         std::string cur_header_value;
 
@@ -78,7 +42,7 @@ namespace usub::server::experimental {
 
     struct RequestBase {
         Settings settings;
-        ParseProgress progress;
+        // ParseProgress progress; // Moved to the parser class
     };
 
     template<class BodyType, class HeaderType>
@@ -87,17 +51,18 @@ namespace usub::server::experimental {
         HeaderType headers;
     };
 
+
     // TODO: Think about FramingPolicy: wether to allow/disallow certain encodings: only chunked, only content-length, both, etc.
     // Allow trailers or not, etc.
-    // enum class FRAMING_POLICY : uint8_t {
-    //     ALL = 0,
-    //     CONTENT_LENGTH_ONLY = 1,
-    //     CHUNKED_ONLY = 2,
-    // };
+    enum class FRAMING_POLICY : uint8_t {
+        ALL = 0,
+        CONTENT_LENGTH_ONLY = 1,
+        CHUNKED_ONLY = 2,
+    };
 
     struct RoutePolicy {
-        // FRAMING_POLICY framing = FRAMING_POLICY::ALL; // Probably should be const too
-        // bool allow_trailers = false; // Probably should be const too
+        static const FRAMING_POLICY framing = FRAMING_POLICY::ALL; // Allow both chunked and content-length by default NO SUPPORT YET
+        static const bool allow_trailers = false; // Disallow trailers for now NO SUPPORT
         std::size_t max_header_size = 64 * 1024;
         std::size_t max_body_size = 8 * 1024 * 1024;
     };
@@ -109,16 +74,13 @@ namespace usub::server::experimental {
     // max_header_size and max_body_size are per-request limits. They can be changed per-route.
     // They also can both be modified in SETTINGS middleware, and body size can still be modified in HEADER middleware.
     // max_method_token_size, max_uri_size can only be set globally, since that part is parsed before any routing is possible.
-    template<class BodyType, class HeaderType>
+    template<class BodyType, class HeaderType, class HTTPParser>
     struct RequestParserT : public RequestT<BodyType, HeaderType> {
+        friend HTTPParser;
+
         using RequestT = RequestT<BodyType, HeaderType>;
 
         RoutePolicy policy;
-
-        template<enum VERSION Ver>
-        std::expected<void, ParseErrorInfo> parse(std::string_view data) {
-            return {};
-        }
 
         void clean() {
             this->progress = ParseProgress{};
@@ -179,7 +141,7 @@ namespace usub::server::experimental {
 
     template<class T>
     concept sax_parser_compatable = requires(T t, std::string_view chunk) {
-        { t.parse(chunk) } -> std::same_as<std::expected<void, ParseErrorInfo>>;// TODO: maybe some other signature?
+        { t.parse(chunk) } -> std::same_as<std::expected<void, ParseErrorInfo>>;// TODO: maybe some other signature? Dafuq
     };
 
     template<class T>
@@ -195,6 +157,21 @@ namespace usub::server::experimental {
 
         std::expected<void, ParseErrorInfo> parse(std::string_view chunk) {
             data.append(chunk);
+            return {};
+        }
+    };
+
+    template<class T>
+    struct JsonParser {
+        T data;
+        static constexpr TYPE type = TYPE::DOM;
+
+        std::expected<void, ParseErrorInfo> parse(std::string &&body) {
+            try {
+                data = T::from_json(body);
+            } catch (const std::exception &e) {
+                return std::unexpected(ParseErrorInfo{1, e.what()});
+            }
             return {};
         }
     };
