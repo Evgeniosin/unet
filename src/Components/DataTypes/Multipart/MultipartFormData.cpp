@@ -75,7 +75,6 @@ std::expected<void, std::string> MultipartFormData::parse(std::string input) {
 
                 std::string ctype = rawContentType.value_or("text/plain; charset=US-ASCII");
 
-                std::string content = dataBuffer.str();
 				std::string content = dataBuffer.str();
 				
 				if (!content.empty() && content.back() == '\n')
@@ -314,4 +313,5 @@ MultipartFormData& MultipartFormData::setBoundary(std::string boundary) {
 	this->boundary_ = boundary;
 	return *this;
 }
+
 
