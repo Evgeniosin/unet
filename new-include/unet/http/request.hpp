@@ -20,10 +20,10 @@ namespace usub::unet::http {
     };
 
     struct Request {
-        MessagePolicy policy{};
         RequestMetadata metadata{};
         usub::unet::header::Headers headers{};
         std::string body{};
+        MessagePolicy policy{};// keep it last for easier initialization
     };
 
 }// namespace usub::unet::http

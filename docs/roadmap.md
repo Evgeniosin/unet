@@ -15,6 +15,7 @@ Webserver is under active development. Our goal is to provide a modern, efficien
 - Improved request/response state machines
 - Extended test coverage
 - Developer documentation and examples
+- Windows support
 
 ## Planned
 - **HTTP/2** support (multiplexed streams, HPACK header compression)
@@ -23,7 +24,6 @@ Webserver is under active development. Our goal is to provide a modern, efficien
 - Streaming responses and chunked uploads
 - Pluggable logging
 - Benchmarks and performance comparison against other frameworks
-- Windows support
 - Chunked streaming support
 
 ## Ideas
