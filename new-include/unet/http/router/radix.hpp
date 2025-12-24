@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <regex>
+#include <stack>
 #include <string>
 #include <unordered_map>
 #include <vector>
