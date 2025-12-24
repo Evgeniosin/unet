@@ -39,22 +39,22 @@ jobs:
       - name: Configure CMake (Linux, Makefiles)
         if: runner.os == 'Linux'
         run: |
-          LLVM_PREFIX="$(brew --prefix llvm)"
-          "$LLVM_PREFIX/bin/clang" --version
-          "$LLVM_PREFIX/bin/clang++" --version
-
-          cmake -S . -B build -G Ninja \
+          cmake -S . -B build \
+            -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
+            -DCMAKE_C_COMPILER=gcc-13 \
+            -DCMAKE_CXX_COMPILER=g++-13 \
             -DCMAKE_CXX_STANDARD=23 \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON
 
       - name: Configure CMake (macOS, Ninja)
         if: runner.os == 'macOS'
         run: |
-          cmake -S . -B build \
-            -G "Ninja" \
+          LLVM_PREFIX="$(brew --prefix llvm)"
+          "$LLVM_PREFIX/bin/clang" --version
+          "$LLVM_PREFIX/bin/clang++" --version
+
+          cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
