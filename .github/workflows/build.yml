@@ -2,9 +2,10 @@ name: Build
 
 on:
   push:
-    # Dont forget to remove branches that are not relevant anymore
+    # TODO: Dont forget to remove branches that are not relevant anymore
     branches: [main, strict_parsing]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -30,7 +31,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install llvm ninja
+          brew install llvm
 
       - name: Install toolchain (Windows)
         if: runner.os == 'Windows'
