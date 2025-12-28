@@ -321,12 +321,6 @@ namespace usub::unet::http::router {
         }
     }
 
-    Route &Radix::addPlainStringHandler(const std::set<std::string> &method,
-                                        const std::string &pathPattern,
-                                        std::function<FunctionType> function) {
-        return addRoute(method, pathPattern, std::move(function));
-    }
-
     Route &Radix::addHandler(std::string_view method,
                              const std::string &pathPattern,
                              std::function<FunctionType> function) {
@@ -341,6 +335,10 @@ namespace usub::unet::http::router {
         return addRoute(method, pathPattern, std::move(function), constraints);
     }
 
+    Radix &Radix::addErrorHandler(const std::string &level, std::function<ErrorFunctionType> error_handler_fn) {
+        this->error_handlers_map.emplace(level, error_handler_fn);
+        return *this;
+    }
 
     bool Radix::matchDFS(RadixNode *node,
                          const std::vector<std::string> &segs,

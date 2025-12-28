@@ -6,8 +6,7 @@
 #include "unet/http/middleware.hpp"
 
 namespace usub::unet::http::router {
-    struct Request;
-    struct Response;
+    // TODO: That's not right
 
     /**
      * @typedef FunctionType

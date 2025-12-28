@@ -42,6 +42,8 @@ add_library(unet
     ${UNET_HEADERS}
 )
 
+add_library(usub::unet ALIAS unet)
+
 
 # Link dependencies that the new implementation may need (reuse existing fetches)
 target_link_libraries(unet PUBLIC usub::uvent)
@@ -93,9 +95,20 @@ install(EXPORT serverTargets
 # ======= BUILDING EXAMPLES =============
 # ========================================
 
-option(BUILD_EXAMPLES "Build the Server example executables" OFF)
+option(UNET_BUILD_EXAMPLES "Build unet examples" OFF)
 
 if(BUILD_EXAMPLES)
     # TODO: Add example directories here
     # add_subdirectory(examples)
+endif()
+
+# ========================================
+# ======= BUILDING TESTS =================
+# ========================================
+
+option(UNET_BUILD_TESTS "Build unet tests" ON)
+
+if(BUILD_EXAMPLES)
+    # TODO: Add example directories here
+    add_subdirectory(new-tests)
 endif()

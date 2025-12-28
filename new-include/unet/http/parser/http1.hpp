@@ -23,19 +23,22 @@ namespace usub::unet::http::parser::http1 {
             AUTHORITY_FORM,
             ASTERISK_FORM,
             VERSION,
-            METADATA_CR,
-            METADATA_LF,
+            METADATA_CRLF,
             METADATA_DONE,
             HEADER_KEY,
             HEADER_VALUE,
             HEADER_CR,
             HEADER_LF,
+            HEADERS_CRLF,
             HEADERS_DONE,
             DATA_CONTENT_LENGTH,
             DATA_CHUNKED_SIZE,
+            DATA_CHUNKED_SIZE_CRLF,
             DATA_CHUNKED_DATA,
             DATA_CHUNKED_DATA_CR,
             DATA_CHUNKED_DATA_LF,
+            DATA_CHUNKED_LAST_CR,
+            DATA_CHUNKED_LAST_LF,
             DATA_CHUNK_DONE,
             DATA_DONE,
             TRAILER_KEY,
@@ -60,19 +63,9 @@ namespace usub::unet::http::parser::http1 {
             // MANUALLY Moving from Message.cpp would've been fu... FASTER
             // Now I have to go through this mess and clean up
             // Well today I once again proved that using agents is as useless as it can be
-            std::size_t line_size{0};
+            std::size_t current_state_size{0};
 
-            std::size_t uri_size{0};
-            std::size_t chunk_size{0};
-            std::optional<std::size_t> content_length{};
-
-            std::uint8_t uri_state{0};
-            std::uint8_t uri_port_digits{0};
-            std::uint8_t chunk_size_digits{0};
-            bool chunk_extension{false};
-            bool chunk_after_size{false};
-            bool saw_cr{false};
-            bool chunked{false};
+            std::size_t body_read_size{};// content-length or current chunk read size
         };
 
     public:

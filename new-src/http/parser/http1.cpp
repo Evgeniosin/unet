@@ -24,6 +24,10 @@ namespace usub::unet::http::parser::http1 {
             std::array<std::uint8_t, 256> table{};
             for (char c = '!'; c <= '~'; ++c) table[static_cast<unsigned char>(c)] = 1;
             for (unsigned char c = 128; c <= 255 && c >= 128; ++c) table[c] = 1;
+
+            // Should be supported?
+            table[' '] = 1;
+            table['\t'] = 1;
             return table;
         }
 
@@ -91,9 +95,10 @@ namespace usub::unet::http::parser::http1 {
             table['H'] = 1;
             table['T'] = 1;
             table['P'] = 1;
-            table['1'] = 1;
-            table['0'] = 1;
             table['/'] = 1;
+            table['1'] = 1;
+            table['.'] = 1;
+            table['0'] = 1;
             return table;
         }
 
@@ -189,21 +194,6 @@ namespace usub::unet::http::parser::http1 {
             return false;
         }
 
-        enum class UriState : std::uint8_t {
-            OriginPath = 0,
-            OriginQuery = 1,
-            OriginFragment = 2,
-            AbsoluteScheme = 3,
-            AbsoluteSlash1 = 4,
-            AbsoluteSlash2 = 5,
-            AbsoluteAuthority = 6,
-            AbsolutePath = 7,
-            AbsoluteQuery = 8,
-            AbsoluteFragment = 9,
-            AuthorityHost = 10,
-            AuthorityPort = 11,
-            AuthorityIPv6 = 12,
-        };
     }// namespace
 
     std::expected<Request, Error> RequestParser::parse(const std::string_view raw_request) {
@@ -231,6 +221,7 @@ namespace usub::unet::http::parser::http1 {
         auto &state = ctx.state;
         using Status = usub::unet::http::STATUS_CODE;
 
+        // TODO future reimplementation
         auto fail = [&](Status status, std::string_view message) -> std::expected<void, Error> {
             Error err{};
             err.code = Error::CODE::GENERIC_ERROR;
@@ -239,7 +230,7 @@ namespace usub::unet::http::parser::http1 {
             //TODO: Rethink
             // std::size_t remaining = static_cast<std::size_t>(e - it);
             // std::size_t copy_len = remaining < err.tail.size() ? remaining : err.tail.size();
-            std::memset(err.tail.data(), 0, err.tail.size());
+            // std::memset(err.tail.data(), 0, err.tail.size());
             // if (copy_len > 0) {
             //     std::memcpy(err.tail.data(), it, copy_len);
             // }
@@ -254,43 +245,34 @@ namespace usub::unet::http::parser::http1 {
                     auto &method = request.metadata.method_token;
                     // TODO: WTF? Ok, imma leave it here for now, because it's 5 o'clock, but hell one time I return to LLMS
                     if (method.empty()) {
-                        ctx.uri_size = 0;
-                        ctx.uri_state = 0;
-                        ctx.uri_port_digits = 0;
                         ctx.headers_size = 0;
                         ctx.body_bytes_read = 0;
                         ctx.chunk_bytes_read = 0;
-                        ctx.chunk_size = 0;
-                        ctx.chunk_size_digits = 0;
-                        ctx.chunk_extension = false;
-                        ctx.chunk_after_size = false;
-                        ctx.saw_cr = false;
-                        ctx.line_size = 0;
+                        ctx.current_state_size = 0;
                         ctx.kv_buffer = {};
-                        ctx.content_length.reset();
-                        ctx.chunked = false;
                         request.metadata.uri = {};
                         request.headers = {};
                         request.body.clear();
                     }
                     while (begin != end) {
                         if (is_tchar(*begin)) [[likely]] {
-                            if (method.size() >= usub::unet::http::max_method_token_size) {
-                                return fail(Status::BAD_REQUEST, "Method token too long");
-                            }
                             method.push_back(static_cast<char>(*begin));
                             ++begin;
-                            continue;
-                        }
-                        if (*begin == ' ') {
+                            ++ctx.current_state_size;
+                        } else if (*begin == ' ') {
                             if (method.empty()) {
                                 return fail(Status::BAD_REQUEST, "Empty method token");
                             }
                             ++begin;
                             state = STATE::URI;
+                            ctx.current_state_size = 0;
                             break;
+                        } else {
+                            return fail(Status::BAD_REQUEST, "Invalid method token");
                         }
-                        return fail(Status::BAD_REQUEST, "Invalid method token");
+                        if (ctx.current_state_size > max_method_token_size) {
+                            return fail(Status::BAD_REQUEST, "Method token too big");
+                        }
                     }
                     break;
                 }
@@ -301,7 +283,7 @@ namespace usub::unet::http::parser::http1 {
                     } else if (*begin == '*') {
                         return fail(Status::BAD_REQUEST, "Unsupported");
                         state = STATE::ASTERISK_FORM;
-                    } else if (is_alpha(c)) {
+                    } else if (is_alpha(*begin)) {
                         return fail(Status::BAD_REQUEST, "Unsupported");
                         state = STATE::ABSOLUTE_FORM;
                     } else {
@@ -313,15 +295,16 @@ namespace usub::unet::http::parser::http1 {
                 case STATE::ORIGIN_PATH: {
                     auto &path = request.metadata.uri.path;
                     while (begin != end) {
-                        if (is_path_char(c)) {
+                        if (is_path_char(*begin)) {
                             path.push_back(static_cast<char>(*begin));
                             ++begin;
-                            ++ctx.uri_size;
+                            ++ctx.current_state_size;
                             continue;
                         }
                         if (*begin == '?') {
                             state = STATE::ORIGIN_QUERY;
                             ++begin;
+                            ++ctx.current_state_size;
                             break;
                         }
                         if (*begin == '#') {
@@ -333,11 +316,12 @@ namespace usub::unet::http::parser::http1 {
                         if (*begin == ' ') {
                             state = STATE::VERSION;
                             ++begin;
+                            ctx.current_state_size = 0;
                             break;
                         } else {
                             return fail(Status::BAD_REQUEST, "Invalid path character");
                         }
-                        if (ctx.uri_size >= usub::unet::http::max_uri_size) {
+                        if (ctx.current_state_size >= usub::unet::http::max_uri_size) {
                             return fail(Status::URI_TOO_LONG, "URI too long");
                         }
                     }
@@ -345,18 +329,28 @@ namespace usub::unet::http::parser::http1 {
                 }
                 case STATE::ORIGIN_QUERY: {
                     auto &query = request.metadata.uri.query;
-                    if (is_query_char(*begin)) {
-                        query.push_back(static_cast<char>(*begin));
-                        ++begin;
-                        ++ctx.uri_size;
-                        continue;
-                    } else if (*begin == '#') {
-                        return fail(Status::BAD_REQUEST, "Fragment is diallowed");
-                        state = STATE::ORIGIN_FRAGMENT;
-                        ++begin;
-                        break;
-                    } else {
-                        return fail(Status::BAD_REQUEST, "Invalid query character");
+                    while (begin != end) {
+                        if (is_query_char(*begin)) {
+                            query.push_back(static_cast<char>(*begin));
+                            ++begin;
+                            ++ctx.current_state_size;
+                            continue;
+                        } else if (*begin == '#') {
+                            return fail(Status::BAD_REQUEST, "Fragment is diallowed");
+                            state = STATE::ORIGIN_FRAGMENT;
+                            ++begin;
+                            break;
+                        } else if (*begin == ' ') {
+                            state = STATE::VERSION;
+                            ++begin;
+                            ctx.current_state_size = 0;
+                            break;
+                        } else {
+                            return fail(Status::BAD_REQUEST, "Invalid query character");
+                        }
+                        if (ctx.current_state_size >= usub::unet::http::max_uri_size) {
+                            return fail(Status::URI_TOO_LONG, "URI too long");
+                        }
                     }
                     break;
                 }
@@ -372,44 +366,41 @@ namespace usub::unet::http::parser::http1 {
                 }
                 case STATE::ASTERISK_FORM: {
                     return fail(Status::BAD_REQUEST, "Asterisk form, How did we get here");
+                    if (request.metadata.method_token != "OPTIONS") {
+                        return fail(Status::BAD_REQUEST, "Origin form without OPTIONS method");
+                    }
                 }
                 case STATE::VERSION: {
                     auto &version_buf = ctx.kv_buffer.first;
                     while (begin != end) {
                         if (is_version(*begin)) {
                             version_buf.push_back(static_cast<char>(*begin));
+                            ++ctx.current_state_size;
                             ++begin;
                         } else if (*begin == '\r') {
-                            state = STATE::METADATA_CR;
+                            state = STATE::METADATA_CRLF;
                             ++begin;
                             break;
                         } else {
                             return fail(Status::BAD_REQUEST, "Wrong Version");
                         }
-                        if (version_buf.size() > 8) {
+                        if (ctx.current_state_size > 8) {
                             return fail(Status::BAD_REQUEST, "Version too large");
                         }
                     }
+                    [[fallthrough]];
                 }
-                case STATE::METADATA_CR:
+                case STATE::METADATA_CRLF: {
                     if (begin == end) [[unlikely]] {
-                        return;
+                        return {};
                     }
-                    if (*begin != '\n') {
-                        return fail(Status::BAD_REQUEST, "Missing LF");
-                    }
-                    state = STATE::METADATA_LF;
-                    ++begin;
-                case STATE::METADATA_LF: {
                     auto &version_buf = ctx.kv_buffer.first;
-                    if (begin == end) [[unlikely]] {
-                        return;
-                    }
                     if (*begin != '\n') {
                         return fail(Status::BAD_REQUEST, "Missing LF");
                     }
+                    ++begin;
                     if (version_buf == "HTTP/1.1") {
-                        request.metadata.version = VERSION::HTTP_1_1
+                        request.metadata.version = VERSION::HTTP_1_1;
                     } else if (version_buf == "HTTP/1.0") {
                         request.metadata.version = VERSION::HTTP_1_0;
                     } else {
@@ -417,137 +408,250 @@ namespace usub::unet::http::parser::http1 {
                     }
                     ++begin;
                     state = STATE::METADATA_DONE;
-                    return;
+                    return {};
                 }
                 case STATE::METADATA_DONE:
-                    ctx.kv_buffer = {};
-                    ctx.headers_size = 0;
+                    // We clean here in case the user decides to stop in the middleware, saves time in RAREST cases
+                    ctx.kv_buffer.first.clear();
+                    ctx.current_state_size = 0;
                     state = STATE::HEADER_KEY;
-                    break;
+                    [[fallthrough]];
                 case STATE::HEADER_KEY: {
                     auto &key = ctx.kv_buffer.first;
                     while (begin != end && state == STATE::HEADER_KEY) {
-                        switch (*begin) {
-                            case ' ':
-                                state = STATE::FAILED;
-                                return fail(Status::BAD_REQUEST, "Wrong character in header");
-                            case '\r':
-                                state = STATE::FAILED;
-                                return fail(Status::BAD_REQUEST, "Wrong character in header");
-
-                            case '\n':
-                                state = STATE::FAILED;
-                                return fail(Status::BAD_REQUEST, "Wrong character in header");
-                            case ':':
-                                state = STATE::HEADER_VALUE;
-                                break;
-                            default:
-                                key.push_back(static_cast<char>(*begin));
-                                break;
+                        if (is_tchar(*begin)) [[likely]] {
+                            key.push_back(static_cast<char>(*begin));
+                            ++begin;
+                            ++ctx.headers_size;
+                            continue;
+                        } else if (*begin == ':') {
+                            state = STATE::HEADER_VALUE;
+                            ++ctx.headers_size;
+                            ++begin;
+                            break;
                         }
+                        return fail(Status::BAD_REQUEST, "Invalid character in header name");
+                    }
+                    // Since our reads are limited by 16 kb, there should be no case where not checking this
+                    // after every append can cause problems
+                    if (ctx.headers_size > request.policy.max_header_size) {
+                        return fail(Status::REQUEST_HEADER_FIELDS_TOO_LARGE, "Headers too large");
                     }
                     break;
                 }
                 case STATE::HEADER_VALUE: {
                     auto &value = ctx.kv_buffer.second;
                     while (begin != end) {
-                        if (*begin == '\r') {
+                        if (is_vchar_or_obs(*begin)) {
+                            value.push_back(static_cast<char>(*begin));
                             ++begin;
+                            ++ctx.headers_size;
+                            continue;
+                        } else if (*begin == '\r') {
+                            ++begin;
+                            ++ctx.headers_size;
                             state = STATE::HEADER_CR;
                             break;
                         }
-                        if (*begin == '\n') {
-                            return fail(Status::BAD_REQUEST, "Invalid header line");
-                        }
-                        if (*begin != ' ' && *begin != '\t' && !is_vchar_or_obs(*begin)) {
-                            return fail(Status::BAD_REQUEST, "Invalid header value");
-                        }
-                        value.push_back(static_cast<char>(*begin));
+
+                        return fail(Status::BAD_REQUEST, "Invalid header value");
+                    }
+                    // Since our reads are limited by 16 kb, there should be no case where not checking this
+                    // after every append can cause problems
+                    if (ctx.headers_size > request.policy.max_header_size) {
+                        return fail(Status::REQUEST_HEADER_FIELDS_TOO_LARGE, "Headers too large");
+                    }
+                    break;
+                }
+                case STATE::HEADER_CR: {
+                    // REMINDER: No need to check for begin == end, we break in prev case
+                    if (*begin == '\n') {
+                        ++begin;
+                        ++ctx.headers_size;
+                        state = STATE::HEADER_LF;
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Header Missing LF");
+                    }
+                    [[fallthrough]];
+                }
+                case STATE::HEADER_LF: {
+                    if (begin == end) {
+                        return {};
+                    }
+                    if (is_tchar(*begin)) {
+                        state = STATE::HEADER_KEY;
+                    } else if (*begin == '\r') {
+                        ++begin;
+                        ++ctx.headers_size;
+                        state = STATE::HEADERS_CRLF;
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Header Missing CR/unknown char");
+                    }
+                    break;
+                }
+                case STATE::HEADERS_CRLF: {
+                    // REMINDER: No need to check for begin == end, we break in prev case
+                    if (*begin == '\n') {
                         ++begin;
                         ++ctx.headers_size;
                         if (ctx.headers_size > request.policy.max_header_size) {
                             return fail(Status::REQUEST_HEADER_FIELDS_TOO_LARGE, "Headers too large");
                         }
+                        state = STATE::HEADERS_DONE;
+                        return {};
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Header Missing CR/unknown char");
                     }
-                    break;
-                }
-                case STATE::HEADER_CR: {
-                    // TODO: impl
-                    break;
-                }
-                case STATE::HEADER_LF: {
-                    // TODO: impl
-                    break;
+                    [[fallthrough]];
                 }
                 case STATE::HEADERS_DONE: {
-                    const auto max_body = request.policy.max_body_size;
-                    // TODO: WHY?
-                    if (ctx.chunked) {
-                        ctx.chunk_size = 0;
-                        ctx.chunk_size_digits = 0;
-                        ctx.chunk_extension = false;
-                        ctx.body_bytes_read = 0;
-                        ctx.chunk_bytes_read = 0;
-                        ctx.chunk_after_size = false;
-                        state = STATE::DATA_CHUNKED_SIZE;
-                        break;
-                    }
-                    if (ctx.content_length.has_value()) {
-                        if (*ctx.content_length > max_body) {
-                            return fail(Status::PAYLOAD_TOO_LARGE, "Body exceeds configured limit");
-                        }
-                        if (*ctx.content_length == 0) {
-                            state = STATE::COMPLETE;
-                            break;
-                        }
-                        ctx.body_bytes_read = 0;
-                        state = STATE::DATA_CONTENT_LENGTH;
-                        break;
-                    }
-                    if (request.metadata.method_token == "GET" || request.metadata.method_token == "HEAD") {
+                    if (request.metadata.method_token == "GET" || request.metadata.method_token == "OPTIONS") {
                         state = STATE::COMPLETE;
-                        break;
                     }
-                    return fail(Status::LENGTH_REQUIRED, "Missing Content-Length");
+                    break;
                 }
                 case STATE::DATA_CONTENT_LENGTH: {
-                    if (!ctx.content_length.has_value()) {
-                        return fail(Status::BAD_REQUEST, "Missing Content-Length");
-                    }
-                    std::size_t remaining = *ctx.content_length - ctx.body_bytes_read;
-                    std::size_t available = static_cast<std::size_t>(e - it);
-                    std::size_t take = remaining < available ? remaining : available;
-                    if (take > 0) {
-                        request.body.append(it, take);
-                        ctx.body_bytes_read += take;
-                        it += take;
-                    }
-                    if (ctx.body_bytes_read == *ctx.content_length) {
-                        state = STATE::DATA_CHUNK_DONE;
-                        begin = it;
+                    auto &content_length = ctx.body_read_size;
+                    std::size_t already = static_cast<std::size_t>(ctx.current_state_size);
+
+                    const std::size_t remaining = content_length - already;
+                    const std::size_t available = static_cast<std::size_t>(end - begin);
+                    const std::size_t take = (available < remaining) ? available : remaining;
+
+                    if (already >= content_length) break;
+
+                    // TODO: memcpy?
+                    request.body.append(reinterpret_cast<const char *>(begin), take);
+
+                    begin += take;
+                    ctx.current_state_size += take;
+                    ctx.body_bytes_read += take;
+
+                    if (ctx.current_state_size == content_length) {
+                        state = STATE::COMPLETE;
                         return {};
+                    } else if (ctx.current_state_size > request.policy.max_body_size || ctx.current_state_size > content_length) {
+                        return fail(Status::PAYLOAD_TOO_LARGE, "Body size too big");
                     }
+
                     break;
                 }
                 case STATE::DATA_CHUNKED_SIZE: {
-                    // TODO: Implement
+                    while (begin != end) {
+                        if (std::isxdigit(*begin)) {
+                            ctx.kv_buffer.first.push_back(*begin);
+                            ++begin;
+                            ++ctx.body_bytes_read;
+                        } else if (*begin == '\r') {
+                            ++begin;
+                            ++ctx.body_bytes_read;
+                            state = STATE::DATA_CHUNKED_SIZE_CRLF;
+                            break;
+                        } else {
+                            // We dont support chunked extensions, that thing is obsoleted and has 0 use cases i can find
+                            // If the need arises, we will, it's not that hard to implement now, but for now, to hell with it
+
+                            // For now, I just refuse to do so
+                            return fail(Status::BAD_REQUEST, "Unknown symbol in chunked size");
+                        }
+                    }
+                    break;
+                }
+                case STATE::DATA_CHUNKED_SIZE_CRLF: {
+                    if (*begin == '\n') {
+                        ctx.body_read_size = std::stoull(ctx.kv_buffer.first, nullptr, 16);// this might throw, TODO: Replace with some not throwing alt
+                        ++begin;
+                        ++ctx.body_bytes_read;
+                        state = STATE::DATA_CHUNKED_DATA;
+                        if (ctx.body_read_size == 0) {
+                            state = STATE::DATA_CHUNKED_LAST_CR;
+                        }
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Missing LF in chunked size");
+                    }
                     break;
                 }
                 case STATE::DATA_CHUNKED_DATA: {
-                    // TODO: Implement
+                    const std::size_t remaining =
+                            static_cast<std::size_t>(ctx.body_read_size - ctx.current_state_size);
+                    if (remaining == 0) {
+                        state = STATE::DATA_CHUNKED_DATA_CR;
+                        break;
+                    }
+
+                    const std::size_t available = static_cast<std::size_t>(end - begin);
+                    const std::size_t take = (available < remaining) ? available : remaining;
+
+                    request.body.append(reinterpret_cast<const char *>(begin), take);
+
+                    begin += take;
+                    ctx.current_state_size += take;
+                    ctx.body_bytes_read += take;
+
+                    if (ctx.current_state_size == ctx.body_read_size) {
+                        state = STATE::DATA_CHUNKED_DATA_CR;
+                        break;
+                    }
+
+                    break;
                 }
-                case STATE::DATA_CHUNKED_DATA_CR:
-                    // TODO: Implement
+                case STATE::DATA_CHUNKED_DATA_CR: {
+                    if (*begin != '\r') {
+                        return fail(Status::BAD_REQUEST, "Missing CR after chunk data");
+                    }
+                    ++begin;
+                    ++ctx.body_bytes_read;
+                    state = STATE::DATA_CHUNKED_DATA_LF;
+                }
                 case STATE::DATA_CHUNKED_DATA_LF: {
-                    // TODO: Implement
+                    if (begin == end) break;
+                    if (*begin != '\n') {
+                        return fail(Status::BAD_REQUEST, "Missing LF after chunk data");
+                    }
+                    ++begin;
+                    ++ctx.body_bytes_read;
+
+                    state = STATE::DATA_CHUNK_DONE;
+                    return {};
                 }
-                case STATE::DATA_CHUNK_DONE:
-                    // TODO: Implement
+                case STATE::DATA_CHUNK_DONE: {
+                    ctx.current_state_size = 0;
+                    break;
+                }
+                case STATE::DATA_CHUNKED_LAST_CR: {
+                    if (*begin == '\r') {
+                        ++begin;
+                        ++ctx.body_bytes_read;
+                        state = STATE::DATA_CHUNKED_LAST_LF;
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Missing CR DATA_CHUNKED_LAST_CR");
+                    }
+                    [[fallthrough]];
+                }
+                case STATE::DATA_CHUNKED_LAST_LF: {
+                    if (begin == end) {
+                        return {};
+                    }
+                    if (*begin == '\n') {
+                        ++begin;
+                        ++ctx.body_bytes_read;
+                        state = STATE::DATA_DONE;
+                    } else {
+                        return fail(Status::BAD_REQUEST, "Missing LF DATA_CHUNKED_LAST_LF");
+                    }
+                    [[fallthrough]];
+                }
                 case STATE::DATA_DONE:
-                    // TODO: Implement
+                    if (begin != end) {
+                        return fail(Status::BAD_REQUEST, "Trailers unsupported yet");
+                    }
+                    return {};
+                    // TODO: Think if content-length should also go here, for some kind of check
                     break;
                 case STATE::COMPLETE:
-                    return {};
+                    // TODO: Clear request/response and parser state
+                    state = STATE::METHOD_TOKEN;
+                    break;
                 case STATE::FAILED:
                     begin = end;
                     return fail(Status::BAD_REQUEST, "Parser in failed state");

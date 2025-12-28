@@ -41,6 +41,9 @@ namespace usub::unet::http::router {
         std::unique_ptr<Route> route = nullptr;
     };
 
+    using ErrorFunctionType = usub::uvent::task::Awaitable<void>(const Request &, Response &);
+    using ErrorHandlers = std::unordered_map<std::string, std::function<ErrorFunctionType>>;//ErrorCode, Function. map
+
     class Radix {
     public:
         Radix() : root_(std::make_unique<RadixNode>()) {}
@@ -50,16 +53,14 @@ namespace usub::unet::http::router {
                         std::function<FunctionType> handler,
                         const std::unordered_map<std::string_view, const param_constraint *> &constraints = no_constraints);
 
-        Route &addPlainStringHandler(const std::set<std::string> &method, const std::string &pathPattern, std::function<FunctionType> function);
-
-        Route &addHandler(const std::set<std::string> &method, const std::string &pathPattern, std::function<FunctionType> function);
-
-        Route &addHandler(std::string_view method, const std::string &pathPattern, std::function<FunctionType> function);
-
         Route &addHandler(const std::set<std::string> &method,
                           const std::string &pathPattern,
                           std::function<FunctionType> function,
                           std::unordered_map<std::string_view, const param_constraint *> &&constraints = {});
+
+        Route &addHandler(std::string_view method, const std::string &pathPattern, std::function<FunctionType> function);
+
+        Radix &addErrorHandler(const std::string &level, std::function<ErrorFunctionType> error_handler_fn);
 
         std::expected<Route *, STATUS_CODE> match(usub::unet::http::Request &request, std::string *error_description = nullptr);
 
@@ -70,6 +71,7 @@ namespace usub::unet::http::router {
         std::string dump() const;
 
     private:
+        ErrorHandlers error_handlers_map;
         std::unique_ptr<RadixNode> root_;
         std::vector<Route> routes_;
         // std::unordered_map<std::string, std::function<FunctionType>> error_page_handlers_;
